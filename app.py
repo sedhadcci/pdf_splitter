@@ -15,18 +15,26 @@ HEADER_ZONE_RATIO = 0.12
 
 
 def extract_name_from_page(fitz_doc, page_index: int) -> str:
-    """Extrait le nom depuis la zone haute d'une page PDF."""
+    """Extrait le nom en trouvant le texte avec la plus grande police sur la page."""
     page = fitz_doc[page_index]
-    rect = page.rect
+    blocks = page.get_text("dict")["blocks"]
 
-    top_zone = fitz.Rect(0, 0, rect.width, rect.height * HEADER_ZONE_RATIO)
-    text = page.get_text("text", clip=top_zone).strip()
+    best_text = ""
+    best_size = 0
 
-    for line in text.splitlines():
-        line = line.strip()
-        if line:
-            clean = re.sub(r'[\\/*?:"<>|]', "", line)
-            return clean
+    for block in blocks:
+        if block.get("type") != 0:  # 0 = bloc texte
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                size = span.get("size", 0)
+                text = span.get("text", "").strip()
+                if text and size > best_size:
+                    best_size = size
+                    best_text = text
+
+    if best_text:
+        return re.sub(r'[\\/*?:"<>|]', "", best_text).strip()
 
     return f"Page_{page_index + 1}"
 
@@ -71,18 +79,24 @@ if uploaded_file:
         col2.markdown(f"`{sanitize_filename(name)}.pdf`")
 
     # ── MODE DEBUG ──────────────────────────────
-    with st.expander("🔍 Debug — voir tout le texte extrait par page"):
-        st.caption(
-            "Si 'PARIS Valerie' n'apparaît pas dans le texte extrait → "
-            "le nom est une image → il faut activer l'OCR."
-        )
+    with st.expander("🔍 Debug — tailles de police détectées par page"):
+        st.caption("Le texte avec la plus grande police est sélectionné comme nom.")
         for i in range(num_pages):
             page = fitz_doc[i]
-            rect = page.rect
-            top_zone = fitz.Rect(0, 0, rect.width, rect.height * 0.30)
-            raw_text = page.get_text("text", clip=top_zone).strip()
-            st.markdown(f"**Page {i + 1} :**")
-            st.code(raw_text if raw_text else "(aucun texte — probablement une image)")
+            blocks = page.get_text("dict")["blocks"]
+            sizes = []
+            for block in blocks:
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        t = span.get("text", "").strip()
+                        s = span.get("size", 0)
+                        if t:
+                            sizes.append((round(s, 1), t[:60]))
+            sizes.sort(reverse=True)
+            st.markdown(f"**Page {i + 1} — top 5 textes par taille de police :**")
+            st.table({"Taille": [x[0] for x in sizes[:5]], "Texte": [x[1] for x in sizes[:5]]})
     # ────────────────────────────────────────────
 
     st.divider()
