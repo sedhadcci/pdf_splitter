@@ -1,45 +1,75 @@
 import streamlit as st
 import pypdf
+import fitz  # pymupdf
 import zipfile
 import io
+import re
 
 # ──────────────────────────────────────────────
-#  CONFIGURATION — modifier ici si besoin
+#  CONFIGURATION
 # ──────────────────────────────────────────────
-PAGE_NAMES = {
-    1: "Seddik",
-    2: "Arthur",
-    3: "Rosana",
-    4: "Axel",
-}
+# Hauteur (en %) de la zone du haut où chercher le nom
+# 0.12 = 12% du haut de la page — ajuster si besoin
+HEADER_ZONE_RATIO = 0.12
 # ──────────────────────────────────────────────
 
+
+def extract_name_from_page(fitz_doc, page_index: int) -> str:
+    """Extrait le nom depuis la zone haute d'une page PDF."""
+    page = fitz_doc[page_index]
+    rect = page.rect
+
+    top_zone = fitz.Rect(0, 0, rect.width, rect.height * HEADER_ZONE_RATIO)
+    text = page.get_text("text", clip=top_zone).strip()
+
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            clean = re.sub(r'[\\/*?:"<>|]', "", line)
+            return clean
+
+    return f"Page_{page_index + 1}"
+
+
+def sanitize_filename(name: str) -> str:
+    name = re.sub(r'[\\/*?:"<>|]', "", name).strip()
+    return name if name else "fichier_inconnu"
+
+
+# ──────────────────────────────────────────────
+#  INTERFACE
+# ──────────────────────────────────────────────
 st.set_page_config(page_title="PDF Splitter", page_icon="📄")
 
-st.title("📄 PDF Splitter")
-st.markdown("Dépose ton fichier PDF — chaque page sera automatiquement renommée et exportée.")
+st.title("📄 PDF Splitter — Détection automatique")
+st.markdown(
+    "Dépose ton PDF : le nom en haut de chaque page sera détecté automatiquement "
+    "et utilisé pour nommer le fichier généré."
+)
 
 uploaded_file = st.file_uploader("Choisir un fichier PDF", type="pdf")
 
 if uploaded_file:
-    reader = pypdf.PdfReader(uploaded_file)
-    num_pages = len(reader.pages)
+    file_bytes = uploaded_file.read()
 
+    reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+    fitz_doc = fitz.open(stream=file_bytes, filetype="pdf")
+
+    num_pages = len(reader.pages)
     st.success(f"✅ Fichier chargé : **{num_pages} page(s)** détectée(s)")
 
-    # Aperçu des fichiers qui seront générés
-    st.subheader("📋 Fichiers qui seront générés")
-    cols = st.columns(2)
-    for i in range(1, num_pages + 1):
-        name = PAGE_NAMES.get(i, f"Page_{i}")
-        col = cols[(i - 1) % 2]
-        col.markdown(f"**Page {i}** → `{name}.pdf`")
+    detected_names = []
+    for i in range(num_pages):
+        name = extract_name_from_page(fitz_doc, i)
+        detected_names.append(name)
 
-    if num_pages > len(PAGE_NAMES):
-        st.warning(
-            f"⚠️ Le PDF contient {num_pages} pages mais seulement {len(PAGE_NAMES)} noms sont configurés. "
-            f"Les pages supplémentaires seront nommées `Page_X.pdf`."
-        )
+    st.subheader("📋 Noms détectés")
+    st.caption("Si un nom est incorrect, ajuste la zone de détection dans le code (HEADER_ZONE_RATIO).")
+
+    for i, name in enumerate(detected_names):
+        col1, col2 = st.columns([1, 4])
+        col1.markdown(f"**Page {i + 1}**")
+        col2.markdown(f"`{sanitize_filename(name)}.pdf`")
 
     st.divider()
 
@@ -47,9 +77,17 @@ if uploaded_file:
         zip_buffer = io.BytesIO()
 
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            name_counts = {}
+
             for i in range(num_pages):
-                page_num = i + 1
-                name = PAGE_NAMES.get(page_num, f"Page_{page_num}")
+                raw_name = sanitize_filename(detected_names[i])
+
+                if raw_name in name_counts:
+                    name_counts[raw_name] += 1
+                    filename = f"{raw_name}_{name_counts[raw_name]}.pdf"
+                else:
+                    name_counts[raw_name] = 1
+                    filename = f"{raw_name}.pdf"
 
                 writer = pypdf.PdfWriter()
                 writer.add_page(reader.pages[i])
@@ -58,7 +96,7 @@ if uploaded_file:
                 writer.write(pdf_buffer)
                 pdf_buffer.seek(0)
 
-                zip_file.writestr(f"{name}.pdf", pdf_buffer.read())
+                zip_file.writestr(filename, pdf_buffer.read())
 
         zip_buffer.seek(0)
 
