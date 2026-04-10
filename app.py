@@ -64,12 +64,26 @@ if uploaded_file:
         detected_names.append(name)
 
     st.subheader("📋 Noms détectés")
-    st.caption("Si un nom est incorrect, ajuste la zone de détection dans le code (HEADER_ZONE_RATIO).")
 
     for i, name in enumerate(detected_names):
         col1, col2 = st.columns([1, 4])
         col1.markdown(f"**Page {i + 1}**")
         col2.markdown(f"`{sanitize_filename(name)}.pdf`")
+
+    # ── MODE DEBUG ──────────────────────────────
+    with st.expander("🔍 Debug — voir tout le texte extrait par page"):
+        st.caption(
+            "Si 'PARIS Valerie' n'apparaît pas dans le texte extrait → "
+            "le nom est une image → il faut activer l'OCR."
+        )
+        for i in range(num_pages):
+            page = fitz_doc[i]
+            rect = page.rect
+            top_zone = fitz.Rect(0, 0, rect.width, rect.height * 0.30)
+            raw_text = page.get_text("text", clip=top_zone).strip()
+            st.markdown(f"**Page {i + 1} :**")
+            st.code(raw_text if raw_text else "(aucun texte — probablement une image)")
+    # ────────────────────────────────────────────
 
     st.divider()
 
