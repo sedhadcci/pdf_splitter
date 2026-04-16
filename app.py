@@ -209,7 +209,12 @@ def send_to_sharepoint(pdfs: dict, pa_url_1: str, pa_url_2: str):
         # Dernier fichier → déclenche le flux 2
         if idx == len(filenames) - 1 and pa_url_2:
             try:
-                requests.post(pa_url_2, json={"trigger": "all_files_sent"}, timeout=30)
+                requests.post(
+                    pa_url_2,
+                    json={},
+                    headers={"Content-Type": "application/json"},
+                    timeout=30
+                )
             except Exception:
                 pass
 
